@@ -8,8 +8,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import com.parallelc.mixflipmod.Prefs
+import com.parallelc.mixflipmod.hook.util.HookScope
 import com.parallelc.mixflipmod.hook.util.after
 import com.parallelc.mixflipmod.hook.util.callMethod
+import com.parallelc.mixflipmod.hook.util.createDexKitBridge
 import com.parallelc.mixflipmod.hook.util.field
 import com.parallelc.mixflipmod.hook.util.findClass
 import com.parallelc.mixflipmod.hook.util.getField
@@ -26,6 +28,7 @@ import io.github.libxposed.api.XposedInterface.Hooker
 import io.github.libxposed.api.XposedInterface.Invoker.Type
 import io.github.libxposed.api.XposedInterface.PRIORITY_LOWEST
 import io.github.libxposed.api.XposedModuleInterface.PackageReadyParam
+import java.lang.reflect.Method
 
 object SystemUIHook : BaseHook() {
     override val targetPackages = listOf("com.android.systemui")
@@ -46,8 +49,78 @@ object SystemUIHook : BaseHook() {
 
     private fun hookNotification(param: PackageReadyParam, miuiConfigs: Class<*>) {
         val clazz = param.classLoader.findClass("com.android.systemui.statusbar.notification.row.MiuiNotificationMenuRow")
-        val fakeTinyScreen = hookScope(miuiConfigs.method("isTinyScreen", Context::class.java)) { false }
-        hook(clazz.method("createMenuViews", Boolean::class.java)) { chain -> fakeTinyScreen.run { chain.proceed() } }
+        val legacyTinyScreenScopes = listOf("isTinyScreen", "isFlipTinyScreen")
+            .mapNotNull { name ->
+                runCatching { miuiConfigs.method(name, Context::class.java) }
+                    .getOrNull()
+            }
+            .distinct()
+            .map { method -> hookScope(method) { false } }
+
+        val newTinyScreenPath = findNewNotificationTinyScreenPath(param)
+        val fakeAppMiniWindowTinyScreens = newTinyScreenPath
+            ?.first
+            .orEmpty()
+            .map { method -> hookScope(method) { false } }
+
+        hook(clazz.method("createMenuViews", Boolean::class.java)) { chain ->
+            proceedWithScopes(chain, legacyTinyScreenScopes + fakeAppMiniWindowTinyScreens)
+        }
+
+        val (appMiniWindowIsTiny, miniWindowBarUpdates) = newTinyScreenPath ?: return
+        log(
+            "new notification tiny-screen paths hooked: " +
+                "${appMiniWindowIsTiny.joinToString { "${it.declaringClass.name}#${it.name}" }}, " +
+                "updateMiniWindowBar=${miniWindowBarUpdates.size}"
+        )
+
+        miniWindowBarUpdates.forEach { updateMethod ->
+            runCatching { module!!.deoptimize(updateMethod) }
+            hook(updateMethod) { chain -> proceedWithScopes(chain, fakeAppMiniWindowTinyScreens) }
+        }
+
+        runCatching {
+            param.classLoader
+                .findClass("com.android.systemui.statusbar.notification.modal.ModalController")
+                .declaredMethods
+                .filter { it.name == "enterModal" }
+                .onEach { it.isAccessible = true }
+        }.getOrDefault(emptyList()).forEach { enterModal ->
+            runCatching { module!!.deoptimize(enterModal) }
+            hook(enterModal) { chain -> proceedWithScopes(chain, fakeAppMiniWindowTinyScreens) }
+        }
+    }
+
+    private fun findNewNotificationTinyScreenPath(param: PackageReadyParam): Pair<List<Method>, List<Method>>? =
+        runCatching {
+            createDexKitBridge(param.classLoader).use { bridge ->
+                val isTinyScreen = bridge.findMethod {
+                    matcher {
+                        name = "isTinyScreen"
+                        returnType = "boolean"
+                    }
+                }.asSequence()
+                    .mapNotNull { data -> runCatching { data.getMethodInstance(param.classLoader) }.getOrNull() }
+                    .distinct()
+                    .toList()
+                    .takeIf { it.isNotEmpty() }
+                    ?: return@use null
+
+                val updateMiniWindowBar = bridge.findMethod {
+                    matcher { name = "updateMiniWindowBar" }
+                }.asSequence()
+                    .mapNotNull { data -> runCatching { data.getMethodInstance(param.classLoader) }.getOrNull() }
+                    .distinct()
+                    .toList()
+
+                isTinyScreen to updateMiniWindowBar
+            }
+        }.onFailure { log("new notification tiny-screen path lookup failed", it) }
+            .getOrNull()
+
+    private fun proceedWithScopes(chain: Chain, scopes: List<HookScope>, index: Int = 0): Any? {
+        if (index >= scopes.size) return chain.proceed()
+        return scopes[index].run { proceedWithScopes(chain, scopes, index + 1) }
     }
 
     private fun hookControlCenter(param: PackageReadyParam, miuiConfigs: Class<*>) {
@@ -58,15 +131,20 @@ object SystemUIHook : BaseHook() {
 
             override fun intercept(chain: Chain): Any? {
                 val result = chain.proceed()
-                val mComponentName = chain.thisObject?.getField("mComponentName") as? ComponentName ?: return result
                 if (isHooked) return result
-                if (mComponentName !in controlCenterComponents) return result
 
                 val pluginLoader = (result as? ContextWrapper)?.classLoader ?: return result
+                val componentName = runCatching {
+                    chain.thisObject?.getField("mComponentName") as? ComponentName
+                }.getOrNull()
+                if (componentName != null && componentName !in controlCenterComponents) return result
+
+                val styleClass = runCatching {
+                    pluginLoader.loadClass($$"miui.systemui.controlcenter.panel.main.MainPanelController$Style")
+                }.getOrNull() ?: return result
                 isHooked = true
 
                 runCatching {
-                    val styleClass = pluginLoader.loadClass($$"miui.systemui.controlcenter.panel.main.MainPanelController$Style")
                     val compactStyle = styleClass.field("COMPACT").get(null)
                     val verticalStyle = styleClass.field("VERTICAL").get(null)
 
