@@ -14,9 +14,6 @@ apksign {
     keyPasswordProperty = "androidKeyPassword"
 }
 
-val repo = jgit.repo()
-val commitCount = repo?.commitCount("refs/remotes/origin/main") ?: 1
-val latestTag = repo?.latestTag?.removePrefix("v") ?: "3.0"
 
 android {
     namespace = "vip.chener.mixflipmod"
@@ -26,15 +23,15 @@ android {
         applicationId = "vip.chener.mixflipmod"
         minSdk = 35
         targetSdk = 36
-        versionCode = commitCount
-        versionName = latestTag
-
+        versionCode = 30100
+        versionName = "3.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -43,6 +40,7 @@ android {
         create("unminified") {
             initWith(getByName("release"))
             isMinifyEnabled = false
+            isShrinkResources = false
             isDebuggable = false
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += "release"
@@ -56,6 +54,28 @@ android {
 
 kotlin {
     jvmToolchain(17)
+}
+
+// CI reads resolved values so the workflow follows app versions and SDK changes.
+val releaseMetadata = mapOf(
+    "versionName" to requireNotNull(android.defaultConfig.versionName),
+    "versionCode" to requireNotNull(android.defaultConfig.versionCode),
+    "compileSdk" to requireNotNull(android.compileSdk),
+    "compileSdkMinor" to (android.compileSdkMinor ?: 0),
+    "buildToolsVersion" to android.buildToolsVersion,
+)
+val releaseMetadataFile = layout.buildDirectory.file("release-metadata.json")
+tasks.register("writeReleaseMetadata") {
+    group = "publishing"
+    description = "Exports the app version and SDK requirements for GitHub Releases."
+    inputs.properties(releaseMetadata)
+    outputs.file(releaseMetadataFile)
+    doLast {
+        releaseMetadataFile.get().asFile.apply {
+            parentFile.mkdirs()
+            writeText(groovy.json.JsonOutput.toJson(releaseMetadata))
+        }
+    }
 }
 
 androidComponents {

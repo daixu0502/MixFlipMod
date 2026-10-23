@@ -20,6 +20,19 @@
 
 主界面的应用信息在后台加载并复用，列表入口独立懒加载，图标使用有容量上限的内存缓存。仅保留实际使用的三个 Material 扩展图标源码，避免未启用 R8 时打包完整扩展图标库。
 
+## 自动构建与发布
+
+`.github/workflows/release.yml` 沿用 MusicEnhance 的发布规则：推送到 `main`、推送 `v*` 标签或手动运行 Actions 时，根据 `app/build.gradle.kts` 的版本构建并上传 GitHub Release。标签须匹配应用版本，例如 `3.1.0` 对应 `v3.1.0`。
+
+- 数字版本发布为正式 Release；带 `-beta` 后缀的版本发布为 Pre-release。
+- 从上一个同类型 Release 汇总提交，生成更新日志。
+- 上传原始命名的 Release APK 和 `.apk.sha256` 文件，Actions 产物保留 14 天。
+- 已公开的版本不覆盖；发布新版本需同时递增 `versionName` 和 `versionCode`。上传失败保留草稿，允许重试。
+
+Actions Secrets 继续使用 `KEY_STORE`（JKS 文件的 Base64）、`KEY_STORE_PASSWORD` 和 `ALIAS`；可选的 `KEY_PASSWORD` 未设置时使用密钥库密码。自动发布必须配置签名，不会回退到调试签名；发布使用当前仓库的 `GITHUB_TOKEN`。
+
+检查发布规则：`python -B -m unittest discover -s .github/scripts/tests -v`。构建前可执行 `./gradlew --no-configuration-cache :app:writeReleaseMetadata :app:lintRelease :app:assembleRelease`（Windows 使用 `gradlew.bat`）。
+
 ## 功能
 
 隐藏外屏状态：
