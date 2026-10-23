@@ -1,0 +1,75 @@
+package vip.chener.mixflipmod.hook.util
+
+import android.util.Log
+import vip.chener.mixflipmod.Prefs
+import vip.chener.mixflipmod.module
+import io.github.libxposed.api.XposedInterface.Chain
+import io.github.libxposed.api.XposedInterface.HookHandle
+import io.github.libxposed.api.XposedInterface.Hooker
+import org.luckypray.dexkit.DexKitBridge
+import java.lang.reflect.Executable
+
+private const val LOG_TAG = "mixflipmod"
+
+internal fun safeHook(name: String, block: () -> Unit) {
+    runCatching(block).onFailure { log("[$name] failed", it) }
+}
+
+internal fun log(msg: String, e: Throwable? = null) {
+    module?.log(Log.ERROR, LOG_TAG, msg, e)
+}
+
+internal fun hook(origin: Executable, hooker: Hooker): HookHandle = module!!.hook(origin).intercept(hooker)
+
+internal fun hook(origin: Executable, priority: Int, hooker: Hooker): HookHandle = module!!.hook(origin).setPriority(priority).intercept(hooker)
+
+internal fun prefEnabled(key: String): Boolean {
+    return module!!.getRemotePreferences(Prefs.NAME).getBoolean(key, false)
+}
+
+internal fun prefInt(key: String, defaultValue: Int): Int {
+    return module!!.getRemotePreferences(Prefs.NAME).getInt(key, defaultValue)
+}
+
+internal fun prefString(key: String, defaultValue: String): String {
+    return module!!.getRemotePreferences(Prefs.NAME).getString(key, defaultValue) ?: defaultValue
+}
+
+internal fun replaceResult(value: Any?): Hooker = Hooker { value }
+
+internal fun after(block: (Chain, Any?) -> Any?): Hooker = Hooker { chain ->
+    val result = chain.proceed()
+    block(chain, result)
+}
+
+internal inline fun <T> runWithCleanup(cleanup: () -> Unit, block: () -> T): T {
+    return runCatching(block).also { cleanup() }.getOrThrow()
+}
+
+internal fun hookScope(origin: Executable, activeHooker: (Chain) -> Any?): HookScope {
+    val active = ThreadLocal<Boolean>()
+    hook(origin) { chain ->
+        if (active.get() == true) activeHooker(chain) else chain.proceed()
+    }
+    return HookScope(active)
+}
+
+internal class HookScope(private val active: ThreadLocal<Boolean>) {
+    fun <T> run(block: () -> T): T {
+        active.set(true)
+        return runWithCleanup({ active.remove() }, block)
+    }
+
+    fun stopOn(origin: Executable): HookScope {
+        hook(origin) { chain ->
+            active.remove()
+            chain.proceed()
+        }
+        return this
+    }
+}
+
+internal fun createDexKitBridge(classLoader: ClassLoader): DexKitBridge {
+    System.loadLibrary("dexkit")
+    return DexKitBridge.create(classLoader, false)
+}

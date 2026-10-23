@@ -4,6 +4,22 @@
 
 支持 HyperOS 3.0 及以上版本，需要配合支持 libxposed API 101 的 Xposed 框架使用
 
+应用包名为 `vip.chener.mixflipmod`。与原包名版本属于不同应用，安装后需要在 LSPosed 中重新启用并设置作用域，原版本的设置不会自动迁移；请避免同时启用两个版本。
+
+## 构建与性能验证
+
+使用 JDK 17 和 Android SDK 37 构建。在 Windows 上执行：
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+.\gradlew.bat :app:assembleUnminified
+.\gradlew.bat :app:assembleRelease
+```
+
+`debug` 为可调试版本，未启用 R8；`unminified` 为不可调试且未启用 R8 的性能验证版本，使用调试签名；`release` 保持启用 R8。产物分别位于 `app/build/outputs/apk/` 下的同名目录。比较 R8 对流畅度的影响时，应使用 `unminified` 与 `release`，避免混入 Compose 调试开销。
+
+主界面的应用信息在后台加载并复用，列表入口独立懒加载，图标使用有容量上限的内存缓存。仅保留实际使用的三个 Material 扩展图标源码，避免未启用 R8 时打包完整扩展图标库。
+
 ## 功能
 
 隐藏外屏状态：
@@ -61,6 +77,7 @@
 
 - [KernelSU](https://github.com/tiann/KernelSU)
 - [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler)
+- [AndroidX Compose Material Icons](https://android.googlesource.com/platform/frameworks/support/+/androidx-main/compose/material/material-icons-extended/)：三个本地图标保留原始 Apache-2.0 许可证声明。
 
 ## 许可
 

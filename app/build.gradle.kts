@@ -19,11 +19,11 @@ val commitCount = repo?.commitCount("refs/remotes/origin/main") ?: 1
 val latestTag = repo?.latestTag?.removePrefix("v") ?: "3.0"
 
 android {
-    namespace = "com.parallelc.mixflipmod"
+    namespace = "vip.chener.mixflipmod"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.parallelc.mixflipmod"
+        applicationId = "vip.chener.mixflipmod"
         minSdk = 35
         targetSdk = 36
         versionCode = commitCount
@@ -39,6 +39,13 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        create("unminified") {
+            initWith(getByName("release"))
+            isMinifyEnabled = false
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
         }
     }
     buildFeatures {
@@ -67,11 +74,11 @@ androidComponents {
 dependencies {
     implementation(libs.androidx.activity.ktx)
     implementation(libs.lifecycle.runtime.ktx)
+    implementation(libs.lifecycle.runtime.compose)
     implementation(libs.activity.compose)
     implementation(platform(libs.compose.bom))
     implementation(libs.androidx.foundation)
     implementation(libs.androidx.material.icons.core)
-    implementation(libs.androidx.material.icons.extended)
     implementation(libs.miuix.ui)
     implementation(libs.miuix.preference)
     implementation(libs.miuix.icons)
