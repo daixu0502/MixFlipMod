@@ -23,8 +23,8 @@ android {
         applicationId = "vip.chener.mixflipmod"
         minSdk = 35
         targetSdk = 36
-        versionCode = 30100
-        versionName = "3.1.0"
+        versionCode = 30300
+        versionName = "3.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
